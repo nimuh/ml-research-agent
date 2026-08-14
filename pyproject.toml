@@ -31,7 +31,10 @@ literature = ["arxiv>=2.1", "pymupdf>=1.24", "beautifulsoup4>=4.12"]
 knowledge = ["numpy>=1.26", "rank-bm25>=0.2.2", "networkx>=3.3"]
 experiments = ["numpy>=1.26", "pandas>=2.2", "scipy>=1.13", "matplotlib>=3.9"]
 dev = ["pytest>=8.2", "pytest-asyncio>=0.23", "ruff>=0.5", "mypy>=1.10"]
-all = ["ml-research-agent[literature,knowledge,experiments,dev]"]
+# Only needed for `llm.provider: claude_code`, which reaches Claude through a
+# logged-in Claude Code CLI instead of an API key.
+claude-code = ["claude-agent-sdk>=0.2"]
+all = ["ml-research-agent[literature,knowledge,experiments,claude-code,dev]"]
 
 [project.scripts]
 mra = "ml_research_agent.cli:main"

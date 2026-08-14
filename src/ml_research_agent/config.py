@@ -111,7 +111,14 @@ class TierConfig(_Section):
 
 
 class LLMConfig(_Section):
-    provider: Literal["anthropic"] = "anthropic"
+    #: ``anthropic`` calls the API with a key; ``claude_code`` drives the
+    #: Claude Code CLI and reuses whatever credentials it is already logged in
+    #: with, so a subscription works with no key set.
+    provider: Literal["anthropic", "claude_code"] = "anthropic"
+    #: Whether ``claude_code`` usage is really billed in dollars. False for a
+    #: subscription, where the reported cost is an API-equivalent rather than a
+    #: charge -- see ``ClaudeCodeLLMClient.budget_usd``.
+    subscription_cost_is_billed: bool = False
     tiers: TierConfig = Field(default_factory=TierConfig)
     max_concurrency: int = Field(default=8, ge=1)
     cache_responses: bool = True

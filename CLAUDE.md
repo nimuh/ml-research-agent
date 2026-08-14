@@ -14,7 +14,7 @@ The whole test suite runs **offline** — no API key, no network. `llm.client.Fa
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[all]"          # or [literature] / [knowledge] / [experiments] / [dev]
+pip install -e ".[all]"          # or [literature] / [knowledge] / [experiments] / [claude-code] / [dev]
 cp .env.example .env             # ANTHROPIC_API_KEY required; others optional
 
 pytest                           # testpaths=tests, -q by default
@@ -44,6 +44,8 @@ The non-editable install loses live source edits, so prefer `PYTHONPATH=src` whi
 ## Configuration
 
 `configs/default.yaml` documents every knob. Precedence: CLI flag > `MRA_*` env > `configs/local.yaml` (gitignored) > `configs/default.yaml`. Nested keys use a double underscore in env: `MRA_BUDGET__USD_PER_PROJECT=50`. Config objects are immutable and passed explicitly — no module-level globals.
+
+Two providers, selected by `llm.provider`. `anthropic` is the metered API and needs `ANTHROPIC_API_KEY`. `claude_code` drives the logged-in Claude Code CLI through the Claude Agent SDK, so a Claude Code subscription needs no key at all — set it in `configs/local.yaml` and install `[claude-code]`. `llm/claude_code.py` documents what the adapter has to do to make an agent harness behave like a single-shot completion endpoint; read it before changing anything there.
 
 Model tiers are configured, not hardcoded: `fast` (haiku) for extraction/screening, `standard` (sonnet) for notes and code work, `deep` (opus) for framing, design, and critique. `orchestrator/router.py` is the only place that maps a task to a tier.
 

@@ -19,6 +19,7 @@ from ..config import Config
 from ..errors import BudgetExceeded, GateRejected, MRAError, PhasePreconditionFailed
 from ..llm.budget import BudgetTracker
 from ..llm.cache import ResponseCache
+from ..llm.claude_code import build_client
 from ..llm.client import LLMClient
 from ..llm.prompts import PromptLibrary
 from ..observability.cost import CostLedger
@@ -85,7 +86,7 @@ class ResearchDirector:
         self.budget = BudgetTracker(config.budget, ledger=self.ledger)
         self.tracer = Tracer(enabled=config.observability.trace, logger=self.logger)
         self.cache = ResponseCache(config.paths.cache / "llm", enabled=config.llm.cache_responses)
-        self.llm = llm or LLMClient(
+        self.llm = llm or build_client(
             config,
             cache=self.cache,
             budget=self.budget,

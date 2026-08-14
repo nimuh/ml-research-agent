@@ -71,8 +71,15 @@ def idea(
     except MRAError as exc:
         _fail(exc)
         return
+    # `run_phase` reports a failed phase as a not-ok outcome rather than raising,
+    # so the `except` above never sees it. Check the outcome before touching the
+    # brief: on failure there is none, and asserting turns an actionable message
+    # ("set ANTHROPIC_API_KEY") into an AssertionError traceback.
     brief = director.state.snapshot.brief
-    assert brief is not None
+    if not outcome.ok or brief is None:
+        console.print(f"[bold red]error:[/] {outcome.summary or 'framing failed'}")
+        director.close()
+        raise typer.Exit(code=1)
     console.print(f"[bold green]project[/] {director.state.project_id}")
     console.print(f"[bold]{brief.title}[/]\n")
     console.print(brief.problem_statement + "\n")
@@ -84,8 +91,6 @@ def idea(
             f"  ✓ {criterion.metric} {criterion.comparator} {criterion.threshold}"
             + (f" on {criterion.dataset}" if criterion.dataset else "")
         )
-    if not outcome.ok:
-        raise typer.Exit(code=1)
     director.close()
 
 

@@ -11,7 +11,16 @@ paths:
   cache: ./workspace/cache            # HTTP / LLM / embedding caches
 
 llm:
+  # anthropic  -> Anthropic API, needs ANTHROPIC_API_KEY.
+  # claude_code -> drives the Claude Code CLI and reuses the credentials it is
+  #   already logged in with, so a Claude Code subscription needs no API key.
+  #   Requires `pip install 'ml-research-agent[claude-code]'` and a logged-in
+  #   `claude` CLI.
   provider: anthropic
+  # Subscription usage is not billed per call, so the cost Claude Code reports
+  # is an API-equivalent, not a charge, and does not count against
+  # budget.usd_per_project. Set true if your Claude Code usage is metered.
+  subscription_cost_is_billed: false
   tiers:
     fast: claude-haiku-4-5-20251001   # extraction, screening, classification
     standard: claude-sonnet-5         # note writing, code analysis, implementation

@@ -13,7 +13,7 @@ Noticing is the wrong mechanism, so this test does it mechanically.
 from __future__ import annotations
 
 import ast
-from pathlib import Path
+import re
 
 import pytest
 
@@ -27,10 +27,6 @@ CONFIG = SRC / "config.py"
 SELF_READ_ONLY = {
     "api_key_env": "read by Config.api_key / require_api_key, inside config.py by design",
     "tiers": "read by Config.model_for, the accessor llm/client.py calls",
-    "provider": (
-        "enforced by its Literal type at parse time rather than by a runtime reader; "
-        "a second provider would need one"
-    ),
 }
 
 
@@ -49,17 +45,46 @@ def _config_fields() -> dict[str, str]:
     return fields
 
 
+def _reader_pattern(field: str) -> re.Pattern[str]:
+    """Match a read of `field`, not a longer name that merely contains it.
+
+    The trailing `(?![A-Za-z0-9_])` is what makes this more than a substring
+    test: without it `max_tokens` is "read" by any line mentioning
+    `max_tokens_per_phase`, and a genuinely unwired knob hiding behind a longer
+    name is exactly what this test exists to catch.
+
+    The bare-string-literal alternative is deliberately loose, and it is
+    load-bearing: `gates.py` reads its fields as `getattr(config.gates, name)`
+    and `config.py` resolves tiers the same way, so for six fields the literal
+    `"after_survey"` / `"fast"` *is* the read — there is no attribute access to
+    find. Requiring a `["field"]` subscript instead would fail all six.
+
+    The cost of keeping it: a field whose name is also ordinary vocabulary can
+    be credited to an unrelated string. A config field named `retry` would be
+    counted as read by `runner_agent.py`'s `"retry"` action enum. So this test
+    proves a knob is *mentioned* somewhere plausible, not that it changes
+    behaviour — it catches the dead-knob class of bug (five real ones so far)
+    and does not replace reading the code.
+    """
+    name = re.escape(field)
+    return re.compile(
+        # `cfg.field` attribute access, or `"field"` / `'field'` as a key...
+        rf"""(?:\.|["']){name}(?![A-Za-z0-9_])"""
+        # ...or `field=` as a keyword argument (but not `field ==` a comparison).
+        rf"""|(?<![A-Za-z0-9_]){name}\s*=(?!=)"""
+    )
+
+
 def _readers(field: str) -> list[str]:
     """Modules outside `config.py` that mention the field by name."""
+    pattern = _reader_pattern(field)
     hits = []
     for path in SRC.rglob("*.py"):
         if path == CONFIG:
             continue
-        # Word-boundary match on the attribute name; a substring match would let
-        # `max_tokens` be "read" by `max_tokens_per_phase` and hide a real gap.
         source = path.read_text(encoding="utf-8")
         for line in source.splitlines():
-            if f".{field}" in line or f'"{field}"' in line or f"{field}=" in line:
+            if pattern.search(line):
                 hits.append(path.relative_to(SRC).as_posix())
                 break
     return hits
@@ -87,9 +112,51 @@ def test_every_config_field_has_a_reader(field: str) -> None:
     )
 
 
+def test_a_longer_field_name_does_not_count_as_a_reader() -> None:
+    # The failure mode this guard is built to survive: `max_tokens` must not be
+    # satisfied by a line that only ever mentions `max_tokens_per_phase`. If this
+    # regresses, `test_every_config_field_has_a_reader` still passes while a
+    # genuinely unwired knob sits behind a longer name that happens to be used.
+    pattern = _reader_pattern("max_tokens")
+    assert not pattern.search("limit = cfg.max_tokens_per_phase")
+    assert not pattern.search('cfg["max_tokens_per_phase"]')
+    assert not pattern.search("max_tokens_per_phase=4")
+    # ...while the genuine forms still register.
+    assert pattern.search("limit = cfg.max_tokens")
+    assert pattern.search('cfg["max_tokens"]')
+    assert pattern.search("max_tokens=4")
+    # A comparison is not a read of the config knob it names.
+    assert not pattern.search("if max_tokens == 4:")
+
+
+@pytest.mark.parametrize(
+    "field", ["after_survey", "before_run", "before_report", "fast", "standard", "deep"]
+)
+def test_getattr_read_fields_are_still_recognised(field: str) -> None:
+    # These six are never accessed as `config.gates.after_survey`; they are read
+    # via `getattr(config.gates, name)` with the name supplied as a literal. The
+    # string literal is the only trace of the read, which is why
+    # `_reader_pattern` accepts a bare literal. Tightening it to require a
+    # `["field"]` subscript would fail all six for no gain — this test is here to
+    # say so at the point of change rather than leave it to be rediscovered.
+    assert _readers(field), (
+        f"`{field}` is read dynamically via getattr; if this now fails, the "
+        "reader pattern was tightened past what dynamic access can express"
+    )
+
+
 def test_the_allowlist_does_not_hide_a_live_field() -> None:
-    # If an allowlisted field gains a real reader, the entry is stale and should
-    # go, so the allowlist stays a short list of genuine exceptions.
+    # An allowlist that is never re-checked is how this test rots into a rubber
+    # stamp: `provider` sat here reasoned as "no runtime reader, a second
+    # provider would need one" until `claude_code` added exactly that reader,
+    # and nothing noticed. Assert the absence of a reader, not just that the
+    # entry is well-formed -- an entry that stops being true has to fail here,
+    # which is the whole point of writing the check down.
     for field, reason in SELF_READ_ONLY.items():
         assert field in FIELDS, f"allowlisted `{field}` no longer exists; drop the entry"
         assert reason, "every allowlist entry needs a justification"
+        readers = _readers(field)
+        assert not readers, (
+            f"`{field}` is allowlisted as read only inside config.py, but {readers} now reads it. "
+            "The exemption is stale -- delete the entry and let the normal check cover it."
+        )

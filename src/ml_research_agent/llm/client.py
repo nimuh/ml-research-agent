@@ -148,7 +148,9 @@ class LLMClient:
         projected_output = int(params["max_tokens"])
         if self.budget is not None:
             self.budget.check(
-                projected_usd=estimate_cost(model, projected_input, projected_output),
+                projected_usd=self.budget_usd(
+                    estimate_cost(model, projected_input, projected_output)
+                ),
                 projected_tokens=projected_input + projected_output,
                 phase=phase,
             )
@@ -159,7 +161,7 @@ class LLMClient:
             payload = self._invoke_with_retries(
                 model=model, messages=messages, params=params, phase=phase, agent=agent
             )
-            cost = estimate_cost(model, payload["input_tokens"], payload["output_tokens"])
+            cost = self.cost_for(payload, model=model)
             span.set(
                 input_tokens=payload["input_tokens"],
                 output_tokens=payload["output_tokens"],
@@ -180,7 +182,7 @@ class LLMClient:
             )
         if self.budget is not None:
             self.budget.record(
-                usd=cost,
+                usd=self.budget_usd(cost),
                 tokens=payload["input_tokens"] + payload["output_tokens"],
                 phase=phase,
             )
@@ -199,6 +201,20 @@ class LLMClient:
             stop_reason=payload.get("stop_reason"),
         )
         return _response_from_payload(payload, tier=tier_name, cached=False, cost_usd=cost)
+
+    # -- accounting seams ---------------------------------------------------
+    #
+    # What a call *cost* and what it *charges against the ceiling* are the same
+    # number for a metered API and different numbers for a subscription, so
+    # they are two hooks rather than one.
+
+    def cost_for(self, payload: dict[str, Any], *, model: str) -> float:
+        """Dollar cost of a completed call, for the ledger."""
+        return estimate_cost(model, payload["input_tokens"], payload["output_tokens"])
+
+    def budget_usd(self, cost: float) -> float:
+        """The share of ``cost`` that counts against the project ceiling."""
+        return cost
 
     def close(self) -> None:
         client = self._sdk
