@@ -1,26 +1,11 @@
 # python
 __pycache__/
 *.py[cod]
-.venv/
-venv/
-*.egg-info/
-dist/
-build/
-.mypy_cache/
-.ruff_cache/
-.pytest_cache/
 
-# secrets / local config
-.env
-configs/local.yaml
-
-# runtime state: the workspace is regenerable, only its shape is tracked.
-# The middle rule is load-bearing: an excluded directory is never descended
-# into, so without it the .gitkeep negation below can never match and the
-# shape this block claims to track is silently not tracked at all.
-workspace/**
-!workspace/**/
-!workspace/**/.gitkeep
+# Obsidian writes these into any vault it opens; a vault created here for
+# testing is scratch, not source.
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
 
 # misc
 .DS_Store

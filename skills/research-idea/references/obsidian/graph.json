@@ -1,0 +1,29 @@
+{
+  "collapse-filter": false,
+  "search": "",
+  "showTags": true,
+  "showAttachments": false,
+  "hideUnresolved": false,
+  "showOrphans": true,
+  "collapse-color-groups": false,
+  "colorGroups": [
+    { "query": "tag:#source", "color": { "a": 1, "rgb": 5431378 } },
+    { "query": "tag:#claim", "color": { "a": 1, "rgb": 14701138 } },
+    { "query": "tag:#method", "color": { "a": 1, "rgb": 5419488 } },
+    { "query": "tag:#dataset", "color": { "a": 1, "rgb": 11621088 } },
+    { "query": "tag:#metric", "color": { "a": 1, "rgb": 9146386 } },
+    { "query": "tag:#spec OR tag:#run OR tag:#result", "color": { "a": 1, "rgb": 14839017 } },
+    { "query": "tag:#moc", "color": { "a": 1, "rgb": 16711680 } }
+  ],
+  "collapse-display": false,
+  "showArrow": true,
+  "textFadeMultiplier": -0.3,
+  "nodeSizeMultiplier": 1.2,
+  "lineSizeMultiplier": 1,
+  "collapse-forces": false,
+  "centerStrength": 0.4,
+  "repelStrength": 11,
+  "linkStrength": 1,
+  "linkDistance": 260,
+  "scale": 1
+}

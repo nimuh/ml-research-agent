@@ -1,85 +1,115 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code working **on this repository**. For working *with* the
+skills, read `README.md`; for how they fit together, `docs/DESIGN.md`.
 
-## Project status: implemented
+## What this repo is
 
-M0–M5 are built; the ten-phase loop runs end to end and `mra auto "<idea>"` drives it. Each module's docstring is still its spec, and `docs/PLAN.md` is still the contract between modules — **read it before changing anything structural**; it defines the data model, the phase machine, the agent roster, and the safety/cost controls. §9 records how the plan's open questions were settled and which decisions departed from the original text.
+Eleven Claude Code skills plus four stdlib Python scripts. That is all of it.
+There is no package, no dependencies, no build step, and nothing to install
+beyond `./install.sh`, which symlinks `skills/` into `~/.claude/skills`.
 
-When changing a module, honor its docstring rather than redesigning around it. If the docstring is wrong, change it deliberately and check whether `docs/PLAN.md` needs the same edit.
-
-The whole test suite runs **offline** — no API key, no network. `llm.client.FakeLLMClient` scripts model responses (return a pydantic model instance and it becomes a forced tool call), and literature sources are exercised through cassette fixtures. If a change makes a test need the network, the change is wrong.
+It used to be a 9,000-line Python system — an LLM client, six literature source
+adapters, a vector index, an agent framework, a phase orchestrator. That is gone
+on purpose. It was scaffolding for things Claude Code already does, and the
+scaffolding was where the failures were. **The strong default when adding
+anything here is markdown instructions, not code.**
 
 ## Commands
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[all]"          # or [literature] / [knowledge] / [experiments] / [claude-code] / [dev]
-cp .env.example .env             # ANTHROPIC_API_KEY required; others optional
-
-pytest                           # testpaths=tests, -q by default
-pytest tests/unit/test_x.py::test_name    # single test
-ruff check src tests             # line-length 100, rules E,F,I,UP,B,SIM
-ruff format src tests
-mypy                             # strict, pydantic plugin, files=src/ml_research_agent
+python3 tests/test_scripts.py      # 40 tests, stdlib, offline, ~0.3s
+./install.sh --dry-run             # show what would be linked
+./install.sh                       # link into ~/.claude/skills
+./install.sh --uninstall           # remove only the links pointing at this repo
 ```
 
-### A green test suite does not prove the install works
+Skills are discovered when a Claude Code session starts, so a new skill or a
+renamed one needs a fresh session before it can be invoked.
 
-`pytest` sets `pythonpath = ["src"]`, so the suite imports the source tree directly and passes even when the installed package is unimportable. Verify the entrypoint separately with `mra --help` — a green suite is not evidence that it works.
+## Layout
 
-**Known macOS breakage of the editable install.** The `.pth` file pip writes for `pip install -e .` acquires the `com.apple.provenance` extended attribute. `site.addpackage` opens `.pth` files through `io.open_code()` and silently returns on `OSError`, so the file is skipped with no error at all and `import ml_research_agent` fails everywhere except pytest. The attribute is protected — `xattr -c` will not remove it, and a hand-written replacement `.pth` acquires it too, so rewriting the file only works until the next process touches it.
-
-Two workarounds that do hold:
-
-```bash
-PYTHONPATH=src .venv/bin/mra --help   # per-invocation; export it for a session
-pip install .                          # non-editable; copies into site-packages, no .pth
+```
+skills/<name>/
+  SKILL.md         frontmatter + instructions — this IS the spec
+  scripts/         stdlib Python, only where determinism is required
+  references/      templates the skill writes into a vault
 ```
 
-The non-editable install loses live source edits, so prefer `PYTHONPATH=src` while developing.
+`skills/research-idea/references/schema.md` is the vault contract. It is copied
+*into* each vault at `_meta/schema.md` so a vault is self-describing and the
+skills stay decoupled — every other skill reads the contract from the vault it
+is operating on, not from here. Change the schema in both places or not at all.
 
-`mra` is the console entrypoint (`ml_research_agent.cli:main`): `idea`, `survey`, `design`, `run`, `report`, `auto`, `status`, and `kb search|show|stats|health`. Pass `-y` to auto-approve human gates in non-interactive runs.
+## When to write a script instead of an instruction
 
-## Configuration
+Four scripts exist. Each replaces something a model does unreliably and
+confidently:
 
-`configs/default.yaml` documents every knob. Precedence: CLI flag > `MRA_*` env > `configs/local.yaml` (gitignored) > `configs/default.yaml`. Nested keys use a double underscore in env: `MRA_BUDGET__USD_PER_PROJECT=50`. Config objects are immutable and passed explicitly — no module-level globals.
+| Script | Why it is not prose |
+|---|---|
+| `spec_hash.py` | A pre-registration is worthless if editing it is undetectable |
+| `stats.py` | Reading a mean off three numbers is where a model is least trustworthy |
+| `decide.py` | Applying a pre-registered rule must not be a judgment call |
+| `lint_vault.py` | Comparing a hash to its bytes; counting links across 200 files |
 
-Two providers, selected by `llm.provider`. `anthropic` is the metered API and needs `ANTHROPIC_API_KEY`. `claude_code` drives the logged-in Claude Code CLI through the Claude Agent SDK, so a Claude Code subscription needs no key at all — set it in `configs/local.yaml` and install `[claude-code]`. `llm/claude_code.py` documents what the adapter has to do to make an agent harness behave like a single-shot completion endpoint; read it before changing anything there.
+The test: **is it arithmetic, hashing, or exhaustive counting?** If yes, script
+it. If it is extraction, judgment, search or writing, it belongs in a `SKILL.md`
+— putting it in Python is the mistake this repo was built out of.
 
-Model tiers are configured, not hardcoded: `fast` (haiku) for extraction/screening, `standard` (sonnet) for notes and code work, `deep` (opus) for framing, design, and critique. `orchestrator/router.py` is the only place that maps a task to a tier.
+Scripts are stdlib-only so a skill can call them with bare `python3`. That is
+why Student's t is implemented by hand in `stats.py` rather than imported from
+scipy, and why the frontmatter parsers are hand-rolled rather than using yaml.
 
-## Architecture
+## Two duplications that are deliberate
 
-**Dependency rule (strictly one-directional):** platform (`llm/`, `tools/`, `observability/`, `utils/`) ← capability layers (`literature/`, `knowledge/`, `code/`, `experiments/`) ← `agents/` ← `orchestrator/` ← `cli.py`. Capability layers must not import each other; the orchestrator composes them. `cli.py` holds no business logic.
+**`spec_payload` exists in both `spec_hash.py` and `lint_vault.py`.** An
+installed skill has to stand alone, so they cannot share a module.
+`test_the_linter_hashes_a_spec_byte_for_byte_the_same_way` compares the *whole*
+payload through both — an earlier version compared only the decision-rule
+fragment, the two parsers silently disagreed on every other field, and the
+linter reported every honest spec as tampered. If you touch either function,
+that test is the one that matters.
 
-**Control flow:** `orchestrator/director.py` runs a ten-phase machine (FRAME → SURVEY → CURATE → GROUND → SYNTHESIZE → DESIGN → IMPLEMENT → RUN → ANALYZE → REPORT), with ANALYZE looping back to DESIGN on an inconclusive verdict. Each phase declares preconditions and exit criteria scored by the Critic; failing exit criteria loops back rather than proceeding.
+**Templates repeat the schema.** `references/*.md` restate frontmatter that
+`_meta/schema.md` also specifies. A skill has to be usable without reading the
+schema file, so this stays — but the schema wins any disagreement.
 
-**Agents never talk to each other.** All coordination flows through the orchestrator and `orchestrator/state.py` (`ProjectState`: append-only JSONL event log + derived snapshot). Agents are stateless — memory lives in `ProjectState` and the KB. Every agent shares `agents/base.py`'s loop (prompt → tool calls → structured output → validate → repair-on-invalid) and carries an explicit tool allow-list.
+## Writing a SKILL.md
 
-### Invariants that constrain implementation choices
+The frontmatter `description` is how Claude decides to invoke it. It must say
+**when to use it, in the words a user would actually type** — a description that
+only describes what the skill is never gets triggered. `tests/test_scripts.py`
+enforces a trigger clause and a minimum length.
 
-These are load-bearing; violating one is a design regression, not a style preference.
+The body: say *why*, not just what. A capable model will reason its way around
+any instruction that looks arbitrary unless the reason is on the page — which is
+why nearly every rule in these skills carries the failure it prevents. Each skill
+ends with a "getting this wrong" section, and those sections do more work than
+the instructions above them.
 
-- **Traceability.** Every domain object in `types.py` carries `provenance`. The Writer may only assert what a KB citation or a run id backs. Notes without passage-level provenance are rejected.
-- **Files are truth, indexes are derived.** The KB is Markdown + SQLite + blobs under `workspace/kb/`; vector/BM25 indexes must be rebuildable from scratch. Ingest is idempotent by content hash.
-- **Pre-registration.** An `ExperimentSpec` without a stated decision rule (what result would refute the hypothesis) is rejected at DESIGN when `require_preregistered_decision_rule: true`.
-- **Reproducibility contract.** A run is identified by `(spec_hash, code_hash, env_hash, arm, seed)` — the arm is part of the key because one spec runs several arms at the same seed. Seeds default to 3; single-seed deltas are reported as inconclusive by construction.
-- **Cheap before expensive.** The `smoke → small → main` scale ladder is enforced by the orchestrator, not by agent judgment.
-- **Cloning is not running.** Third-party repo code only ever executes inside the sandbox (`experiments/sandbox.py`); `code/fetch.py` must not execute anything at fetch time. License gating (`code/license.py`) precedes any adaptation.
-- **Bounded fan-out, logged truncation.** `max_candidates`, `max_kb_papers`, `snowball_depth`, `max_parallel_runs` — every cap is enforced and every truncation is logged, never silent.
-- **Budgets are hard stops.** Exceeding a ceiling raises `BudgetExceeded`; never silently truncate or degrade.
-- **Single retrieval entrypoint.** All agent retrieval goes through `knowledge/search.py` so there is one place to instrument, cache, and evaluate.
-- **Prompts are data.** Versioned assets under `prompts/` and `llm/prompts/`, diffable and testable against golden cases — not string literals in agent code.
-- **Retrieval ≠ relevance.** `literature/` returns candidates and never judges relevance; screening is the Curator's job, so recall and precision tune independently.
-- **The Critic is adversarial by construction** — prompted to refute, not approve. It runs post-CURATE, post-SYNTHESIZE, post-DESIGN, post-ANALYZE.
+Keep the register plain. No emoji, no hedging, no restating the task back.
 
-## Testing strategy
+## Invariants
 
-Six categories, per `docs/PLAN.md` §7: unit (pure logic, no LLM calls — dedup, ranking, chunking, spec hashing, decision-rule evaluation, budget accounting, stats); golden-prompt tests per agent prompt version; cassette-style HTTP fixtures so literature tests never hit live APIs; one end-to-end tiny run (5 papers, 1 repo, 30-second smoke experiment); a reproducibility test (same spec + seed → same `RunRecord` metrics); and an adversarial suite of deliberately leaky evals, unfair baselines, and single-seed noise the Critic must catch. The LLM response cache (`llm/cache.py`, keyed by model + prompt hash + params) is what makes prompt tests fast and deterministic.
+`docs/DESIGN.md` §4 lists them. They are load-bearing, not stylistic — every one
+is there because of a specific way this kind of system produces confident, wrong
+output. Before changing a skill, check whether §4 needs the same edit. The ones
+most easily broken by a well-meaning simplification:
 
-When creating and running test scripts, have separate agents for writing tests and reviewing test code. When with every major change, make sure the tests pass.
+- Retrieval never screens; screening is a separate phase with recorded reasons.
+- The decision rule is hashed before any run exists, and a design change means a
+  new experiment id — never an edit and a re-hash.
+- A clean null is `refuted`, not `inconclusive`.
+- Contested claims keep both sides.
 
-## workspace/
+## Testing
 
-Runtime state only — gitignored and regenerable (`workspace/**` ignored except `.gitkeep`). Never commit its contents, and never treat anything there as a source of truth that can't be rebuilt. Its `kb/{raw,wiki,reports}/` layout deliberately mirrors the `kb-*` skills so those operate on it directly.
+Every script change needs a test. The most valuable ones are adversarial — a
+number with no quote behind it, a note claiming to have read more than its
+dossier, a spec edited after registration, a significant effect below the
+pre-registered threshold. Those tests are regression tests for the system's
+*judgment*, and they are the reason to trust anything it outputs.
+
+A test that only asserts the happy path is close to worthless here: the failure
+modes are all cases where the output looks fine.
