@@ -1,1 +1,1 @@
-# jepa-research
+# ml-research-agent
